@@ -4,7 +4,7 @@ Software desarrollado en Python para la caracterización geométrica y la estima
 
 ## Estado del proyecto
 
-🚧 En desarrollo.
+ En desarrollo.
 
 ## Características actuales
 
