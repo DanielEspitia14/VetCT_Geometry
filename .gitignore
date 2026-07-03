@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Entornos virtuales
+venv/
+.env/
+
+# VS Code
+.vscode/
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# DICOM y datos
+*.dcm
+*.DCM
+
+# Archivos temporales
+*.log
