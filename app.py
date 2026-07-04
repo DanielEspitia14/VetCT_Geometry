@@ -23,6 +23,14 @@ carpeta_actual = None
 dicom_files = []
 indice_actual = 0
 imagen_ctk = None
+# Herramienta activa del ROI Editor
+modo_herramienta = "rectangulo"
+canvas = None
+
+# ROI temporal
+x_inicio = None
+y_inicio = None
+roi_temporal = None
 
 dataset_actual = None
 imagen_actual = None
@@ -645,14 +653,15 @@ def soltar_roi(event):
 
 
 def abrir_editor_roi():
+
     """
     Abre la ventana del editor de ROI.
     """
-
+    global canvas
     ventana_roi = ctk.CTkToplevel(app)
 
     ventana_roi.title("ROI Editor")
-    ventana_roi.geometry("1100x850")
+    ventana_roi.geometry("850x600")
 
     ventana_roi.transient(app)
     ventana_roi.grab_set()
@@ -662,14 +671,61 @@ def abrir_editor_roi():
     # Barra de herramientas
     # ==========================
 
-    toolbar = ctk.CTkFrame(ventana_roi)
+    toolbar = ctk.CTkFrame(
+        ventana_roi,
+        height=45
+    )
+
+    toolbar.pack_propagate(False)
 
     toolbar.pack(
         fill="x",
         padx=10,
-        pady=10
+        pady=(10, 5)
     )
 
+    # ==========================
+    # Herramientas
+    # ==========================
+
+    boton_rectangulo = ctk.CTkButton(
+        toolbar,
+        text="▭ Rectángulo",
+        width=120,
+        command=lambda: seleccionar_herramienta("rectangulo")
+    )
+
+    boton_rectangulo.pack(
+        side="left",
+        padx=8,
+        pady=6
+    )
+
+    boton_circulo = ctk.CTkButton(
+    toolbar,
+    text="◯ Círculo",
+    width=120,
+    command=lambda: seleccionar_herramienta("circulo")
+)
+
+    boton_circulo.pack(
+        side="left",
+        padx=8,
+        pady=6
+    )
+
+    boton_libre = ctk.CTkButton(
+    toolbar,
+    text="✏ Mano alzada",
+    width=140,
+    command=lambda: seleccionar_herramienta("libre")
+)
+
+    boton_libre.pack(
+        side="left",
+        padx=8,
+        pady=6
+    )
     # ==========================
     # Área del Canvas
     # ==========================
@@ -693,24 +749,35 @@ def abrir_editor_roi():
         fill="both",
         expand=True
     )
-    
+
+    canvas.bind("<Button-1>", iniciar_dibujo)
+    canvas.bind("<B1-Motion>", actualizar_dibujo)
+    canvas.bind("<ButtonRelease-1>", finalizar_dibujo)
+
+    # Mostrar la imagen actual
     if imagen_actual is not None:
 
         imagen = Image.fromarray(
             imagen_actual.astype(np.uint8)
-    )
+        )
 
-    foto = ImageTk.PhotoImage(imagen)
+        # Ajustar la imagen al tamaño del editor
+        imagen.thumbnail((900, 550))
 
-    canvas.create_image(
-        0,
-        0,
-        anchor="nw",
-        image=foto
-    )
+        foto = ImageTk.PhotoImage(imagen)
 
-    canvas.image = foto
-    
+        canvas.create_image(
+            0,
+            0,
+            anchor="nw",
+            image=foto
+        )
+
+        # Mantener una referencia para que la imagen no desaparezca
+        canvas.image = foto
+
+
+
 
     # ==========================
     # Barra inferior
@@ -736,7 +803,7 @@ def abrir_editor_roi():
 
     ctk.CTkButton(
         bottom,
-        text="Confirmar ROI"
+        text="Aplicar ROI"
     ).pack(
         side="right",
         padx=10,
@@ -748,8 +815,59 @@ def abrir_editor_roi():
 # VENTANA PRINCIPAL
 # ======================================================
 
+def seleccionar_herramienta(herramienta):
+    """
+    Cambia la herramienta activa del editor ROI.
+    """
+
+    global modo_herramienta
+
+    modo_herramienta = herramienta
+
+    print(f"Herramienta activa: {modo_herramienta}")
+def iniciar_dibujo(event):
+    """
+    Inicia el dibujo de la ROI.
+    """
+
+    global x_inicio, y_inicio
+
+    x_inicio = event.x
+    y_inicio = event.y
 
 
+def actualizar_dibujo(event):
+    """
+    Actualiza el dibujo de la ROI mientras se mueve el mouse.
+    """
+
+    global roi_temporal
+
+    if modo_herramienta != "rectangulo":
+        return
+
+    if x_inicio is None or y_inicio is None:
+        return
+
+    if roi_temporal is not None:
+        canvas.delete(roi_temporal)
+
+    roi_temporal = canvas.create_rectangle(
+        x_inicio,
+        y_inicio,
+        event.x,
+        event.y,
+        outline="red",
+        width=2
+    )
+
+
+def finalizar_dibujo(event):
+    """
+    Se ejecuta al soltar el botón izquierdo.
+    """
+
+    print(f"Finalizar -> ({event.x}, {event.y})")
 
 app = ctk.CTk()
 
@@ -1034,3 +1152,4 @@ estado_label.pack(
 # ======================================================
 
 app.mainloop()
+
