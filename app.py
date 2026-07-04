@@ -22,6 +22,11 @@ ctk.set_default_color_theme("blue")
 carpeta_actual = None
 dicom_files = []
 indice_actual = 0
+
+#Rango de cortes
+corte_inicial = None
+corte_final = None 
+
 editor_roi_abierto = False
 imagen_ctk = None
 # Herramienta activa del ROI Editor
@@ -258,7 +263,7 @@ def mostrar_corte(indice):
 
         bounding_box_activo = bounding_boxes[indice].copy()
 
-        print("ROI recuperada:")
+        print("Bounding Box recuperado:")
         print(bounding_box_activo)
 
     else:
@@ -513,7 +518,7 @@ def ejecutar_segmentacion():
     # ----------------------------------------
 
     if bounding_box_activo is not None:
-        print("Usando ROI manual:")
+        print("Usando Bounding Box:")
         print(bounding_box_activo)
 
     if imagen_actual is None:
@@ -568,12 +573,25 @@ def ejecutar_segmentacion():
             padx=10,
             pady=(5, 10)
     )
+            # ----------------------------------------
+        # Recorrer el rango seleccionado
+        # ----------------------------------------
+
+        if corte_inicial is not None and corte_final is not None:
+
+            print("\nProcesando cortes...\n")
+
+            for indice in range(corte_inicial, corte_final + 1):
+
+                print(f"Corte {indice + 1}")
+
+            print("\nProceso finalizado.")
 
     boton_aceptar.configure(state="normal")
     boton_roi_manual.configure(state="normal")
 
     boton_segmentar.configure(
-        text="Segmentación realizada",
+        text="✔ Segmentación realizada",
         state="disabled"
     )
 
@@ -634,6 +652,131 @@ def mostrar_segmentacion(resultado):
     imagen = Image.fromarray(img)
 
     mostrar_imagen(imagen)
+
+def establecer_corte_inicial():
+    """
+    Guarda el corte actualmente mostrado como corte inicial.
+    """
+
+    global corte_inicial
+
+    corte_inicial = indice_actual
+
+    print(f"Corte inicial: {corte_inicial + 1}")
+
+    texto_fin = "—"
+
+    if corte_final is not None:
+        texto_fin = str(corte_final + 1)
+
+    etiqueta_rango.configure(
+        text=(
+            "Rango seleccionado\n\n"
+            f"Inicio: {corte_inicial + 1}\n"
+            f"Fin: {texto_fin}"
+        )
+    )
+
+def establecer_corte_final():
+    """
+    Guarda el corte actualmente mostrado como corte final.
+    """
+
+    global corte_final
+
+    corte_final = indice_actual
+
+    print(f"Corte final: {corte_final + 1}")
+
+    texto_inicio = "—"
+
+    if corte_inicial is not None:
+        texto_inicio = str(corte_inicial + 1)
+
+    etiqueta_rango.configure(
+        text=(
+            "Rango seleccionado\n\n"
+            f"Inicio: {texto_inicio}\n"
+            f"Fin: {corte_final + 1}"
+        )
+    )
+
+def procesar_rango():
+    """
+    Recorre todos los cortes seleccionados.
+    """
+
+    if corte_inicial is None or corte_final is None:
+
+        print("Debe seleccionar un corte inicial y uno final.")
+        return
+
+    print("\n===================================")
+    print("Procesando rango de cortes")
+    print("===================================")
+
+    areas = []
+
+    for indice in range(corte_inicial, corte_final + 1):
+
+        ruta = dicom_files[indice]
+
+        ds, img = read_dicom_image(ruta)
+        imagen = obtener_imagen(img)
+
+        # ----------------------------------------
+        # Bounding Box para este corte
+        # ----------------------------------------
+
+        crop_roi = (30, 30, 560, 520)
+
+        if bounding_box_activo is not None:
+
+            crop_roi = (
+                min(bounding_box_activo["x1"], bounding_box_activo["x2"]),
+                min(bounding_box_activo["y1"], bounding_box_activo["y2"]),
+                max(bounding_box_activo["x1"], bounding_box_activo["x2"]),
+                max(bounding_box_activo["y1"], bounding_box_activo["y2"])
+            )
+
+        resultado = segment_body_outer_contour(
+            img,
+            crop=crop_roi,
+            mode="otsu",
+            show=False
+        )   
+
+
+        if resultado is None:
+
+            print(f"Corte {indice + 1}: sin segmentación")
+
+        else:
+
+            area = resultado["area_capture_pix2"]
+
+            areas.append(area)
+
+            print(
+                f"Corte {indice + 1}: "
+                f"{area} pix²"
+            )
+    print(f"\nNúmero de cortes procesados: {len(areas)}")
+    print("\nResumen del procesamiento")
+
+    print(f"Cortes procesados : {len(areas)}")
+
+    if len(areas) > 0:
+
+        print(f"Área mínima       : {min(areas):.2f} pix²")
+        print(f"Área máxima       : {max(areas):.2f} pix²")
+        print(f"Área promedio     : {np.mean(areas):.2f} pix²")
+    print("===================================")
+    print("Proceso finalizado.")
+
+
+
+
 # ======================================================
 # FUNCIONES DE LA INTERFAZ
 # ======================================================
@@ -647,7 +790,7 @@ def reiniciar_interfaz():
     boton_roi_manual.pack_forget()
 
     boton_segmentar.configure(
-        text="Continuar",
+        text="▶ Iniciar segmentación",
         state="disabled"
     )
 
@@ -714,7 +857,7 @@ def seleccionar_carpeta():
 
     # Habilitar el botón nuevamente
     boton_segmentar.configure(
-        text="Continuar",
+        text="▶ Iniciar segmentación",
         state="normal"
     )
 
@@ -729,7 +872,7 @@ def seleccionar_carpeta():
     ) 
 
     boton_segmentar.configure(
-            text="Continuar",
+            text="▶ Iniciar segmentación",
             state="normal"
     )
 
@@ -738,6 +881,9 @@ def seleccionar_carpeta():
             column=0,
             pady=(0, 10)
         )
+
+    boton_inicio.configure(state="normal")
+    boton_fin.configure(state="normal")
 
 def click_roi(event):
     """
@@ -778,8 +924,11 @@ def abrir_editor_roi():
     
     editor_roi_abierto = True
 
-    ventana_roi.title("ROI Editor")
-    ventana_roi.geometry("850x700")
+    ventana_roi.title("Editor Bounding Box")
+    centrar_ventana(ventana_roi,
+                    900,
+                    650
+)
 
     ventana_roi.transient(app)
     ventana_roi.grab_set()
@@ -945,6 +1094,22 @@ def abrir_editor_roi():
 # ======================================================
 # VENTANA PRINCIPAL
 # ======================================================
+def centrar_ventana(ventana, ancho, alto):
+    """
+    Centra una ventana en la pantalla.
+    """
+
+    ventana.update_idletasks()
+
+    pantalla_ancho = ventana.winfo_screenwidth()
+    pantalla_alto = ventana.winfo_screenheight()
+
+    x = (pantalla_ancho - ancho) // 2
+    y = (pantalla_alto - alto) // 2
+
+    ventana.geometry(f"{ancho}x{alto}+{x}+{y}")
+
+
 app = ctk.CTk()
 
 app.bind("<Right>", navegar_teclado)
@@ -953,8 +1118,8 @@ app.bind("<MouseWheel>", navegar_mouse)
 
 app.title("VetCT Geometry")
 
-app.geometry("1000x650")
-app.minsize(900, 600)
+centrar_ventana(app, 1200, 670)
+app.minsize(1100, 700)
 
 app.grid_columnconfigure(0, weight=1)
 app.grid_rowconfigure(1, weight=1)
@@ -1041,7 +1206,7 @@ def aplicar_roi(ventana):
     # Guardar la ROI del corte actual
     bounding_boxes[indice_actual] = bounding_box_activo.copy()
 
-    print("ROI aplicada:")
+    print("Bounding Box aplicado:")
     print(bounding_box_activo)
 
     editor_roi_abierto = False
@@ -1105,7 +1270,7 @@ main.grid_columnconfigure(1, weight=2)
 # PANEL IZQUIERDO
 # ======================================================
 
-left = ctk.CTkFrame(main)
+left = ctk.CTkScrollableFrame(main)
 
 left.grid(
     row=0,
@@ -1114,6 +1279,8 @@ left.grid(
     padx=(10, 5),
     pady=10
 )
+left.grid_rowconfigure(0, weight=1)
+left.grid_columnconfigure(0, weight=1)
 
 titulo_estudio = ctk.CTkLabel(
     left,
@@ -1130,7 +1297,7 @@ boton = ctk.CTkButton(
     command=seleccionar_carpeta
 )
 
-boton.pack(pady=15)
+boton.pack(pady=8)
 
 etiqueta_info = ctk.CTkLabel(
     left,
@@ -1140,26 +1307,74 @@ etiqueta_info = ctk.CTkLabel(
     wraplength=250
 )
 
-etiqueta_info.pack(pady=20)
+etiqueta_info.pack(pady=10)
+
+
 
 
 # ======================================================
-# HERRAMIENTAS
+# RANGO DE CORTES
 # ======================================================
 
-herramientas_frame = ctk.CTkFrame(left)
+rango_frame = ctk.CTkFrame(left)
 
-herramientas_frame.pack(
+rango_frame.pack(
     fill="x",
     padx=15,
-    pady=(10, 15)
+    pady=(0, 8)
 )
 
+ctk.CTkLabel(
+    rango_frame,
+    text="RANGO DE CORTES",
+    font=("Arial", 15, "bold")
+).pack(
+    pady=(5, 5)
+)
+
+boton_inicio = ctk.CTkButton(
+    rango_frame,
+    text="📍 Corte inicial",
+    command=establecer_corte_inicial,
+    state="disabled"
+)
+
+boton_inicio.pack(
+    fill="x",
+    padx=10,
+    pady=(5, 3)
+)
+
+boton_fin = ctk.CTkButton(
+    rango_frame,
+    text="📍 Corte final",
+    command=establecer_corte_final,
+    state="disabled"
+)
+
+boton_fin.pack(
+    fill="x",
+    padx=10,
+    pady=(3, 5)
+)
+
+
+ctk.CTkLabel(
+    left,
+    text="SEGMENTACIÓN",
+    font=("Arial", 15, "bold")
+).pack(
+    pady=(5, 5)
+)
+
+
+
 boton_segmentar = ctk.CTkButton(
-    herramientas_frame,
-    text="Continuar",
+    left,
+    text="▶ Segmentar",
     state="disabled",
-    command=ejecutar_segmentacion
+    command=ejecutar_segmentacion,
+    width=240, 
 )
 
 boton_segmentar.pack(
@@ -1169,15 +1384,42 @@ boton_segmentar.pack(
 )
 
 
+
+# ======================================================
+# RANGO SELECCIONADO
+# ======================================================
+
+etiqueta_rango = ctk.CTkLabel(
+    rango_frame,
+    text=(
+        "Rango seleccionado\n\n"
+        "Inicio: —\n"
+        "Fin: —"
+    ),
+    justify="left"
+)
+
+etiqueta_rango.pack(
+    fill="x",
+    padx=10,
+    pady=(5, 5)
+)
+
+
+
+
+
+
 boton_aceptar = ctk.CTkButton(
-    herramientas_frame,
-    text="✔ Usar segmentación",
-    state="disabled"
+    left,
+    text="✔ Aceptar segmentación",
+    state="disabled",
+    command=procesar_rango
 )
 
 boton_roi_manual = ctk.CTkButton(
-    herramientas_frame,
-    text="✏ Dibujar ROI manual",
+    left,
+    text="Definir Bounding Box",
     state="disabled",
     command=abrir_editor_roi
 )
