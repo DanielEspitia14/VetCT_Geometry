@@ -31,6 +31,8 @@ canvas = None
 x_inicio = None
 y_inicio = None
 roi_temporal = None
+roi_rectangulo = None
+roi_activa = None
 
 dataset_actual = None
 imagen_actual = None
@@ -284,6 +286,7 @@ def navegar_mouse(event):
 # ALGORITMO CIENTÍFICO
 # ======================================================
 
+
 def segment_body_outer_contour(
     img,
     crop=True,
@@ -380,6 +383,17 @@ def segment_body_outer_contour(
 
     area_pix2 = np.sum(body_mask_roi > 0)
 
+    # ==========================================
+    # Máscara en coordenadas globales
+    # ==========================================
+
+    mask_global = np.zeros_like(img, dtype=np.uint8)
+
+    mask_global[
+        y1:y2,
+        x1:x2
+    ] = body_mask_roi
+
     # Coordenadas globales
     x_global = x + x1
     y_global = y + y1
@@ -438,7 +452,7 @@ def segment_body_outer_contour(
 
 
         "contour": c_global,
-        "mask": body_mask_roi
+        "mask": mask_global
     }
 
 
@@ -446,6 +460,14 @@ def ejecutar_segmentacion():
     """
     Ejecuta la segmentación sobre el corte actualmente mostrado.
     """
+
+    # ----------------------------------------
+    # ¿Existe una ROI manual?
+    # ----------------------------------------
+
+    if roi_activa is not None:
+        print("Usando ROI manual:")
+        print(roi_activa)
 
     if imagen_actual is None:
         print("No hay imagen cargada.")
@@ -455,26 +477,49 @@ def ejecutar_segmentacion():
     print("Tipo:", imagen_actual.dtype)
     print("Rango:", np.min(imagen_actual), np.max(imagen_actual))
 
+    # ----------------------------------------
+    # ROI a utilizar
+    # ----------------------------------------
+
+    crop_roi = (30, 30, 560, 520)
+
+    if roi_activa is not None:
+
+        crop_roi = (
+            min(roi_activa["x1"], roi_activa["x2"]),
+            min(roi_activa["y1"], roi_activa["y2"]),
+            max(roi_activa["x1"], roi_activa["x2"]),
+            max(roi_activa["y1"], roi_activa["y2"])
+        )
+
+        print("Usando ROI manual:", crop_roi)
+
     resultado = segment_body_outer_contour(
         imagen_actual,
-        crop=(30, 30, 560, 520),
+        crop=crop_roi,
         mode="otsu",
         show=False
     )
 
-    print("Resultado:", resultado)
     if resultado is not None:
+        print(
+            f"Área = {resultado['area_capture_pix2']} pix² | "
+            f"LAT = {resultado['D_LAT_capture_pix']} px | "
+            f"AP = {resultado['D_AP_capture_pix']} px"
+        )
+    
         mostrar_segmentacion(resultado)
-        boton_aceptar.pack(
-        fill="x",
-        padx=10,
-        pady=(5, 5)
-    )
 
-    boton_roi_manual.pack(
-        fill="x",
-        padx=10,
-        pady=(5, 10)
+        boton_aceptar.pack(
+            fill="x",
+            padx=10,
+            pady=(5, 5)
+        )
+
+        boton_roi_manual.pack(
+            fill="x",
+            padx=10,
+            pady=(5, 10)
     )
 
     boton_aceptar.configure(state="normal")
@@ -661,7 +706,7 @@ def abrir_editor_roi():
     ventana_roi = ctk.CTkToplevel(app)
 
     ventana_roi.title("ROI Editor")
-    ventana_roi.geometry("850x600")
+    ventana_roi.geometry("850x700")
 
     ventana_roi.transient(app)
     ventana_roi.grab_set()
@@ -802,19 +847,32 @@ def abrir_editor_roi():
     )
 
     ctk.CTkButton(
-        bottom,
-        text="Aplicar ROI"
-    ).pack(
-        side="right",
-        padx=10,
-        pady=10
-    )
+    bottom,
+    text="Aplicar ROI",
+    command=lambda: aplicar_roi(ventana_roi)
+).pack(
+    side="right",
+    padx=10,
+    pady=10
+)
 
 
 # ======================================================
 # VENTANA PRINCIPAL
 # ======================================================
+app = ctk.CTk()
 
+app.bind("<Right>", navegar_teclado)
+app.bind("<Left>", navegar_teclado)
+app.bind("<MouseWheel>", navegar_mouse)
+
+app.title("VetCT Geometry")
+
+app.geometry("1000x650")
+app.minsize(900, 600)
+
+app.grid_columnconfigure(0, weight=1)
+app.grid_rowconfigure(1, weight=1)
 def seleccionar_herramienta(herramienta):
     """
     Cambia la herramienta activa del editor ROI.
@@ -864,25 +922,43 @@ def actualizar_dibujo(event):
 
 def finalizar_dibujo(event):
     """
-    Se ejecuta al soltar el botón izquierdo.
+    Finaliza el dibujo de la ROI.
     """
 
-    print(f"Finalizar -> ({event.x}, {event.y})")
+    global roi_rectangulo
 
-app = ctk.CTk()
+    if modo_herramienta != "rectangulo":
+        return
 
-app.bind("<Right>", navegar_teclado)
-app.bind("<Left>", navegar_teclado)
-app.bind("<MouseWheel>", navegar_mouse)
+    roi_rectangulo = {
+        "x1": x_inicio,
+        "y1": y_inicio,
+        "x2": event.x,
+        "y2": event.y
+    }
 
-app.title("VetCT Geometry")
+    print(roi_rectangulo)
 
-app.geometry("1000x650")
-app.minsize(900, 600)
+def aplicar_roi(ventana):
+    """
+    Confirma la ROI seleccionada.
+    """
 
-app.grid_columnconfigure(0, weight=1)
-app.grid_rowconfigure(1, weight=1)
+    global roi_activa
 
+    if roi_rectangulo is None:
+        print("No hay ninguna ROI seleccionada.")
+        return
+
+    roi_activa = roi_rectangulo.copy()
+
+    print("ROI aplicada:")
+    print(roi_activa)
+
+    ventana.destroy()
+
+    # Ejecutar nuevamente la segmentación
+    ejecutar_segmentacion()
 # ======================================================
 # HEADER
 # ======================================================
