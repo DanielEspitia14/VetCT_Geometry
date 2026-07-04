@@ -22,6 +22,7 @@ ctk.set_default_color_theme("blue")
 carpeta_actual = None
 dicom_files = []
 indice_actual = 0
+editor_roi_abierto = False
 imagen_ctk = None
 # Herramienta activa del ROI Editor
 modo_herramienta = "rectangulo"
@@ -31,12 +32,25 @@ canvas = None
 x_inicio = None
 y_inicio = None
 roi_temporal = None
-roi_rectangulo = None
-roi_activa = None
+bounding_box = None
+
+# ROI del corte actualmente seleccionado
+bounding_box_activo = None
+
+# Diccionario de ROI por corte
+bounding_boxes = {}
+
+
+# ======================================================
+# Estado del corte actual
+# ======================================================
+
 
 dataset_actual = None
 imagen_actual = None
 ruta_actual = None
+indice_actual = 0
+
 roi_inicio = None
 roi_fin = None
 dibujando_roi = False
@@ -175,7 +189,8 @@ def mostrar_imagen(imagen_pil):
     alto_preview -= 20
 
     img_w, img_h = imagen_pil.size
-
+    print("Preview:", ancho_preview, "x", alto_preview)
+    print("Imagen :", img_w, "x", img_h)
     # Factor de escala conservando la relación de aspecto
     escala = min(
         ancho_preview / img_w,
@@ -214,6 +229,7 @@ def mostrar_corte(indice):
     global dataset_actual
     global imagen_actual
     global ruta_actual
+    global bounding_box_activo
 
     if not dicom_files:
         return
@@ -226,30 +242,54 @@ def mostrar_corte(indice):
 
     dataset_actual = ds
     imagen_actual = img
+    # imagen_actual = imagen
+
     ruta_actual = ruta
 
     imagen = obtener_imagen(img)
 
     mostrar_imagen(imagen)
+
+    # ----------------------------------------
+    # Restaurar ROI del corte
+    # ----------------------------------------
+
+    if indice in bounding_boxes:
+
+        bounding_box_activo = bounding_boxes[indice].copy()
+
+        print("ROI recuperada:")
+        print(bounding_box_activo)
+
+    else:
+
+        bounding_box_activo = None
     
 def ir_a_corte(indice):
     """
     Cambia al corte indicado y actualiza el visor.
     """
-    global indice_acutal
+    global indice_actual
 
     if not dicom_files:
         return
 
     indice = max(0, min(indice, len(dicom_files) - 1))
 
+    indice_actual = indice
+
     mostrar_corte(indice)
+
     slider_cortes.set(indice)
 
     etiqueta_corte.configure(
         text=f"Corte {indice + 1} / {len(dicom_files)}"
     )
+    # ----------------------------------------
+    # Cambio de corte
+    # ----------------------------------------
 
+    print(f"Corte actual: {indice}")
 
 def cambiar_corte(valor):
     """
@@ -265,6 +305,9 @@ def navegar_teclado(event):
     Navegación mediante las flechas del teclado.
     """
 
+    if editor_roi_abierto:
+        return
+
     if event.keysym == "Right":
         ir_a_corte(indice_actual + 1)
 
@@ -275,6 +318,9 @@ def navegar_mouse(event):
     """
     Navegación mediante la rueda del ratón.
     """
+
+    if editor_roi_abierto:
+        return
 
     if event.delta > 0:
         ir_a_corte(indice_actual - 1)
@@ -289,7 +335,7 @@ def navegar_mouse(event):
 
 def segment_body_outer_contour(
     img,
-    crop=True,
+    crop=None,
     mode="otsu",
     hu_threshold=-500,
     min_area_pix=1000,
@@ -301,6 +347,10 @@ def segment_body_outer_contour(
     - diámetro AP en pixeles
     - área corporal en pixeles cuadrados
 
+    crop:
+        Tupla (x1, y1, x2, y2) que define la región de interés (ROI).
+        Si es None, se procesa la imagen completa.
+        
     mode:
     - "otsu": recomendado para capturas o imágenes sin HU confiables.
     - "hu": recomendado si los valores son HU reales.
@@ -354,14 +404,14 @@ def segment_body_outer_contour(
         cv2.CHAIN_APPROX_SIMPLE
     )
 
-    print("Contornos encontrados:", len(contours))
+   # print("Contornos encontrados:", len(contours))
 
     if len(contours) == 0:
         print("No se encontró ningún contorno.")
         return None
 
     areas = [cv2.contourArea(c) for c in contours]
-    print("Áreas:", areas)
+    # print("Áreas:", areas)
 
     # Filtrar contornos pequeños
     contours = [c for c in contours if cv2.contourArea(c) >= min_area_pix]
@@ -369,7 +419,7 @@ def segment_body_outer_contour(
     print("Contornos después del filtro:", len(contours))
 
     if len(contours) == 0:
-        print("Todos los contornos fueron descartados.")
+        # print("Todos los contornos fueron descartados.")
         return None
 
     # El animal debería ser el objeto de mayor área
@@ -420,10 +470,7 @@ def segment_body_outer_contour(
         )
         ax.add_patch(rect)
 
-        # Contorno en coordenadas globales
-        c_global = c.copy()
-        c_global[:, 0, 0] += x1
-        c_global[:, 0, 1] += y1
+        
 
         ax.plot(c_global[:, 0, 0], c_global[:, 0, 1], linewidth=2)
 
@@ -465,17 +512,17 @@ def ejecutar_segmentacion():
     # ¿Existe una ROI manual?
     # ----------------------------------------
 
-    if roi_activa is not None:
+    if bounding_box_activo is not None:
         print("Usando ROI manual:")
-        print(roi_activa)
+        print(bounding_box_activo)
 
     if imagen_actual is None:
         print("No hay imagen cargada.")
         return
 
-    print("Shape:", imagen_actual.shape)
-    print("Tipo:", imagen_actual.dtype)
-    print("Rango:", np.min(imagen_actual), np.max(imagen_actual))
+    # print("Shape:", imagen_actual.shape)
+    # print("Tipo:", imagen_actual.dtype)
+    # print("Rango:", np.min(imagen_actual), np.max(imagen_actual))
 
     # ----------------------------------------
     # ROI a utilizar
@@ -483,13 +530,13 @@ def ejecutar_segmentacion():
 
     crop_roi = (30, 30, 560, 520)
 
-    if roi_activa is not None:
+    if bounding_box_activo is not None:
 
         crop_roi = (
-            min(roi_activa["x1"], roi_activa["x2"]),
-            min(roi_activa["y1"], roi_activa["y2"]),
-            max(roi_activa["x1"], roi_activa["x2"]),
-            max(roi_activa["y1"], roi_activa["y2"])
+            min(bounding_box_activo["x1"], bounding_box_activo["x2"]),
+            min(bounding_box_activo["y1"], bounding_box_activo["y2"]),
+            max(bounding_box_activo["x1"], bounding_box_activo["x2"]),
+            max(bounding_box_activo["y1"], bounding_box_activo["y2"])
         )
 
         print("Usando ROI manual:", crop_roi)
@@ -534,6 +581,7 @@ def mostrar_segmentacion(resultado):
     """
     Dibuja el resultado de la segmentación sobre la imagen.
     """
+    global bounding_box_activo
 
     img = imagen_actual.copy()
 
@@ -541,18 +589,39 @@ def mostrar_segmentacion(resultado):
 
     img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
 
-    x = resultado["bbox_x"]
-    y = resultado["bbox_y"]
-    w = resultado["bbox_w"]
-    h = resultado["bbox_h"]
+    # ----------------------------------------
+    # Bounding Box definido por el usuario
+    # ----------------------------------------
 
-    cv2.rectangle(
-        img,
-        (x, y),
-        (x + w, y + h),
-        (255, 0, 0),
-        2
-    )
+    if bounding_box_activo is not None:
+
+        x1 = min(
+            bounding_box_activo["x1"],
+            bounding_box_activo["x2"]
+        )
+
+        x2 = max(
+            bounding_box_activo["x1"],
+            bounding_box_activo["x2"]
+        )
+
+        y1 = min(
+            bounding_box_activo["y1"],
+            bounding_box_activo["y2"]
+        )
+
+        y2 = max(
+            bounding_box_activo["y1"],
+            bounding_box_activo["y2"]
+        )
+
+        cv2.rectangle(
+            img,
+            (x1, y1),
+            (x2, y2),
+            (255, 0, 0),
+            2
+        )
 
     cv2.drawContours(
         img,
@@ -703,7 +772,11 @@ def abrir_editor_roi():
     Abre la ventana del editor de ROI.
     """
     global canvas
+    global editor_roi_abierto
+
     ventana_roi = ctk.CTkToplevel(app)
+    
+    editor_roi_abierto = True
 
     ventana_roi.title("ROI Editor")
     ventana_roi.geometry("850x700")
@@ -711,6 +784,18 @@ def abrir_editor_roi():
     ventana_roi.transient(app)
     ventana_roi.grab_set()
     ventana_roi.focus_force()
+
+    def cerrar_editor():
+        global editor_roi_abierto
+
+        editor_roi_abierto = False
+        ventana_roi.destroy()
+
+
+    ventana_roi.protocol(
+        "WM_DELETE_WINDOW",
+        cerrar_editor
+    )
 
     # ==========================
     # Barra de herramientas
@@ -839,7 +924,7 @@ def abrir_editor_roi():
     ctk.CTkButton(
         bottom,
         text="Cancelar",
-        command=ventana_roi.destroy
+        command=cerrar_editor
     ).pack(
         side="left",
         padx=10,
@@ -925,35 +1010,41 @@ def finalizar_dibujo(event):
     Finaliza el dibujo de la ROI.
     """
 
-    global roi_rectangulo
+    global bounding_box
 
     if modo_herramienta != "rectangulo":
         return
 
-    roi_rectangulo = {
+    bounding_box = {
         "x1": x_inicio,
         "y1": y_inicio,
         "x2": event.x,
         "y2": event.y
     }
 
-    print(roi_rectangulo)
+    print(bounding_box)
 
 def aplicar_roi(ventana):
     """
     Confirma la ROI seleccionada.
     """
 
-    global roi_activa
+    global bounding_box_activo
+    global editor_roi_abierto
 
-    if roi_rectangulo is None:
+    if bounding_box is None:
         print("No hay ninguna ROI seleccionada.")
         return
 
-    roi_activa = roi_rectangulo.copy()
+    bounding_box_activo = bounding_box.copy()
+
+    # Guardar la ROI del corte actual
+    bounding_boxes[indice_actual] = bounding_box_activo.copy()
 
     print("ROI aplicada:")
-    print(roi_activa)
+    print(bounding_box_activo)
+
+    editor_roi_abierto = False
 
     ventana.destroy()
 
